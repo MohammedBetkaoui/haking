@@ -1,0 +1,62 @@
+version: '3.9'
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: guardian_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: guardian_db
+      MYSQL_USER: guardian
+      MYSQL_PASSWORD: guardian
+      MYSQL_ROOT_PASSWORD: guardian_root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pguardian_root"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: guardian_backend
+    restart: unless-stopped
+    depends_on:
+      - mysql
+    command: sh -c "npm run db:migrate && npm start"
+    environment:
+      PORT: 4000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: guardian
+      DB_PASS: guardian
+      DB_NAME: guardian_db
+      CORS_ORIGIN: http://localhost:3000
+      NODE_ENV: production
+      REPORT_OUTPUT_DIR: /app/generated-reports
+    ports:
+      - "4000:4000"
+    env_file:
+      - ./backend/.env
+    volumes:
+      - reports_data:/app/generated-reports
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: guardian_dashboard
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  mysql_data:
+  reports_data:
