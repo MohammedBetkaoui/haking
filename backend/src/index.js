@@ -23,6 +23,9 @@ const deviceDetailsRouter = require('./routes/deviceDetails');
 const { runSlaMonitor } = require('./jobs/sla-monitor');
 const { runMonthlyReportJob } = require('./jobs/monthly-reports');
 const { startNetworkScanner, startLogWatcher, siemRouter } = require('./services/auto-detection.service');
+const { startNetworkScanner: startGuardianScanner } = require('./auto-detection/network-scanner.service');
+const { startLogWatcher: startGuardianLogWatcher } = require('./auto-detection/log-watcher.service');
+const siemWebhookRouter = require('./auto-detection/siem-webhook.controller');
 
 const app = express();
 const server = http.createServer(app);
@@ -70,6 +73,7 @@ app.use('/api/users', usersRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/cyber-agent', cyberAgentRouter);
 app.use('/api/auto-detect', siemRouter);
+app.use('/api/siem', siemWebhookRouter);
 app.use('/api/device-details', deviceDetailsRouter);
 
 app.get('/', (_, res) => res.json({ name: 'Guardian API', version: '1.0.0', status: 'running', docs: '/health' }));
@@ -112,6 +116,14 @@ function scheduleJobs() {
 
   if (process.env.AUTO_DETECT_LOG_WATCHER_ENABLED === 'true') {
     startLogWatcher(io);
+  }
+
+  if (process.env.NET_SCAN_ENABLED === 'true') {
+    startGuardianScanner(io);
+  }
+
+  if (process.env.GUARDIAN_LOG_WATCHER_ENABLED === 'true') {
+    startGuardianLogWatcher(io);
   }
 }
 
