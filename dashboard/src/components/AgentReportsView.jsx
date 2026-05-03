@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Bot, Loader2, Shield, ActivitySquare } from 'lucide-react';
-import { fetchCyberAgentIncidents } from '../lib/api';
+import { AlertTriangle, Bot, Loader2, Shield, ActivitySquare, Trash2 } from 'lucide-react';
+import { fetchCyberAgentIncidents, deleteCyberAgentReport } from '../lib/api';
 import { connectSocket } from '../lib/socket';
 
 const CLASS_STYLES = {
@@ -32,13 +32,21 @@ function scoreStyle(score) {
   return 'bg-green-500';
 }
 
-function IncidentRow({ incident, selected, onSelect }) {
+function IncidentRow({ incident, selected, onSelect, onDelete, deleting }) {
   const score = Number(incident?.risk_score || 0);
   const severityClass = CLASS_STYLES[incident.classification] || CLASS_STYLES.MEDIUM;
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={() => onSelect(incident.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(incident.id);
+        }
+      }}
       className={`w-full card border p-3 text-left transition-all ${
         selected ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-gray-800/80 hover:border-gray-700'
       }`}
@@ -53,6 +61,18 @@ function IncidentRow({ incident, selected, onSelect }) {
         <span className="ml-auto text-xs text-gray-500">
           {new Date(incident.timestamp || incident.received_at).toLocaleString('fr-FR')}
         </span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(incident.id);
+          }}
+          disabled={deleting}
+          title="Delete report"
+          className="ml-1 inline-flex items-center justify-center p-1.5 rounded-md border border-red-500/30 text-red-300 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <Trash2 size={14} />
+        </button>
       </div>
       <p className="text-sm text-gray-300 mt-2 line-clamp-2">{incident.summary || incident.narrative || 'No summary provided.'}</p>
       <div className="mt-2 h-1.5 rounded-full bg-gray-800 overflow-hidden">
@@ -61,7 +81,7 @@ function IncidentRow({ incident, selected, onSelect }) {
       <div className="mt-2 text-xs text-gray-500">
         Risk {score}% · {incident.source_ips?.join(', ') || incident.source_ip || 'n/a'}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -132,6 +152,22 @@ export default function AgentReportsView() {
   const [selectedId, setSelectedId] = useState(null);
   const [lastAgentUpdate, setLastAgentUpdate] = useState(null);
   const [explicitAgentStatus, setExplicitAgentStatus] = useState('idle');
+  const [deletingId, setDeletingId] = useState(null);
+
+  const handleDeleteReport = async (id) => {
+    if (!id || deletingId) return;
+
+    setDeletingId(id);
+    try {
+      await deleteCyberAgentReport(id);
+      setReports((prev) => prev.filter((r) => r.id !== id));
+      setSelectedId((current) => (current === id ? null : current));
+    } catch (error) {
+      console.error('Failed to delete report:', error);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -246,6 +282,8 @@ export default function AgentReportsView() {
                 incident={report}
                 selected={selectedId === report.id}
                 onSelect={setSelectedId}
+                onDelete={handleDeleteReport}
+                deleting={deletingId === report.id}
               />
             ))}
           </div>

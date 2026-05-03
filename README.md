@@ -182,3 +182,46 @@ This seed enables immediate testing of assignment and auto-escalation without ma
 - Each audit row is chained through a SHA-256 hash.
 - Notification deliveries are tracked in `notification_deliveries`.
 - Monthly reports are archived in `monthly_reports` with their generated summary payload.
+
+## Detection Positioning and Standards
+
+### Security flow before and inside ISO 27035
+
+```text
+┌─────────────────────────────────────────────────────┐
+│  DETECTION (before ISO 27035)                      │
+│                                                     │
+│  ISO 27001  -> defines WHAT to monitor             │
+│  NIST CSF   -> Identify + Detect framework          │
+│  IEC 62443  -> industrial / OT monitoring model     │
+│                                                     │
+│  Practical tools:                                   │
+│  • SIEM (Splunk, Elastic)      -> correlates logs   │
+│  • IDS/IPS (Snort, Suricata)   -> monitors network  │
+│  • EDR (Defender, CrowdStrike) -> monitors endpoints│
+│  • Log Watcher                 -> monitors system   │
+└─────────────────────────────────────────────────────┘
+                        |
+                        v
+┌─────────────────────────────────────────────────────┐
+│  INCIDENT HANDLING (ISO 27035 starts here)         │
+│                                                     │
+│  Detect -> Report -> Assess -> Respond -> Learn     │
+│                                                     │
+│  This is the full scope covered by ISO 27035        │
+└─────────────────────────────────────────────────────┘
+```
+
+### Simple summary
+
+| Standard / Tool | Role |
+|-----------------|------|
+| SIEM / IDS / EDR | Detects incident signals |
+| ISO 27001 | Defines governance and monitoring policy |
+| ISO 27035 | Handles the incident after detection |
+| NIST SP 800-61 | Practical incident response playbook |
+| Law 18-07 | Legal notification obligation |
+
+### Hackathon context for this project
+
+For this project, the desktop app acts as the initial detection layer when users submit incident signals. It replaces a full SIEM/IDS stack in low-maturity environments, then feeds the ISO 27035 workflow in a realistic and valid way for organizations that are not yet fully instrumented.

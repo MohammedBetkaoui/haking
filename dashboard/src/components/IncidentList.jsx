@@ -2,21 +2,46 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { fetchIncidents } from '../lib/api';
 import { connectSocket } from '../lib/socket';
 import IncidentCard from './IncidentCard';
-import { Filter, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { RefreshCw, Wifi, WifiOff } from 'lucide-react';
 
-const FILTER_OPTIONS = {
-  status:   ['', 'open', 'in_progress', 'mitigating', 'closed'],
-  severity: ['', 'critical', 'high', 'medium', 'low'],
-  category: ['', 'phishing', 'ransomware', 'device_loss', 'data_breach', 'suspicious_activity', 'other'],
-};
+// ── Filter groups ────────────────────────────────────────────────────────────
+const FILTER_GROUPS = [
+  {
+    key: 'status',
+    options: [
+      { value: '',            label: 'Tous' },
+      { value: 'open',        label: 'Ouvert' },
+      { value: 'in_progress', label: 'En cours' },
+      { value: 'mitigating',  label: 'Mitigation' },
+      { value: 'closed',      label: 'Fermé' },
+    ],
+  },
+  {
+    key: 'severity',
+    options: [
+      { value: '',         label: 'Toutes' },
+      { value: 'critical', label: '🔴 Critique' },
+      { value: 'high',     label: '🟠 Élevé' },
+      { value: 'medium',   label: '🟡 Moyen' },
+      { value: 'low',      label: '🟢 Faible' },
+    ],
+  },
+];
 
-const LABEL_MAP = {
-  '': 'Tous',
-  open: 'Ouvert', in_progress: 'En cours', mitigating: 'Mitigation', closed: 'Fermé',
-  critical: 'Critique', high: 'Élevé', medium: 'Moyen', low: 'Faible',
-  phishing: 'Phishing', ransomware: 'Ransomware', device_loss: 'Perte',
-  data_breach: 'Fuite', suspicious_activity: 'Suspect', other: 'Autre',
-};
+// ── Skeleton card ────────────────────────────────────────────────────────────
+function SkeletonCard() {
+  return (
+    <div className="card p-4 border-l-2 border-l-gray-700 space-y-2.5 animate-pulse">
+      <div className="flex gap-2">
+        <div className="skeleton h-4 w-14 rounded-full" />
+        <div className="skeleton h-4 w-16 rounded-full" />
+        <div className="skeleton h-4 w-12 rounded-full" />
+      </div>
+      <div className="skeleton h-4 w-3/4 rounded" />
+      <div className="skeleton h-3 w-1/2 rounded" />
+    </div>
+  );
+}
 
 export default function IncidentList({ onSelect, selectedId, refreshSignal }) {
   const [incidents, setIncidents] = useState([]);
@@ -48,12 +73,7 @@ export default function IncidentList({ onSelect, selectedId, refreshSignal }) {
     const handleConnect = () => setConnected(true);
     const handleDisconnect = () => setConnected(false);
     const handleNewIncident = (incident) => {
-      if (!incident?.id) {
-        load();
-        return;
-      }
-
-      // Mark as new and fetch canonical row from API to avoid partial socket payload issues.
+      if (!incident?.id) { load(); return; }
       setNewIds(ids => new Set([...ids, incident.id]));
       setTimeout(() => setNewIds(ids => {
         const next = new Set(ids);
@@ -81,49 +101,66 @@ export default function IncidentList({ onSelect, selectedId, refreshSignal }) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Filters */}
-      <div className="p-4 border-b border-gray-800 space-y-3">
+      {/* Header bar */}
+      <div className="px-4 pt-4 pb-3 border-b border-gray-800 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Filter size={14} className="text-gray-400" />
-            <span className="text-gray-400 text-sm font-medium">Filtres</span>
-            <span className="text-gray-600 text-xs">({total} incidents)</span>
+            <span className="text-gray-200 text-sm font-semibold">Incidents</span>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700 font-mono">
+              {total}
+            </span>
           </div>
           <div className="flex items-center gap-2">
-            {connected
-              ? <Wifi size={14} className="text-green-400" />
-              : <WifiOff size={14} className="text-red-400" />
-            }
-            <button onClick={load} className="btn-ghost p-1" title="Actualiser">
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <span title={connected ? 'Temps réel actif' : 'Déconnecté'}>
+              {connected
+                ? <Wifi size={13} className="text-green-400" />
+                : <WifiOff size={13} className="text-red-400" />
+              }
+            </span>
+            <button
+              onClick={load}
+              className="text-gray-500 hover:text-gray-200 hover:bg-gray-800 p-1.5 rounded-lg transition-all"
+              title="Actualiser"
+            >
+              <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             </button>
           </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {Object.entries(FILTER_OPTIONS).map(([key, opts]) => (
-            <select
-              key={key}
-              value={filters[key]}
-              onChange={e => setFilters(f => ({ ...f, [key]: e.target.value }))}
-              className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-gray-500"
-            >
-              {opts.map(opt => (
-                <option key={opt} value={opt}>{LABEL_MAP[opt] || opt || `${key} (tous)`}</option>
+
+        {/* Pill filter groups */}
+        <div className="space-y-2">
+          {FILTER_GROUPS.map(({ key, options }) => (
+            <div key={key} className="flex gap-1 flex-wrap">
+              {options.map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => setFilters(f => ({ ...f, [key]: value }))}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-all duration-100 whitespace-nowrap ${
+                    filters[key] === value
+                      ? 'bg-blue-500/20 border-blue-500/40 text-blue-300 font-medium'
+                      : 'bg-gray-800/50 border-gray-700/60 text-gray-400 hover:text-gray-200 hover:border-gray-600'
+                  }`}
+                >
+                  {label}
+                </button>
               ))}
-            </select>
+            </div>
           ))}
         </div>
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {loading && incidents.length === 0 && (
-          <div className="text-center text-gray-500 py-12">Chargement…</div>
+          <>
+            <SkeletonCard /><SkeletonCard /><SkeletonCard /><SkeletonCard />
+          </>
         )}
         {!loading && incidents.length === 0 && (
-          <div className="text-center text-gray-500 py-12">
-            <p className="text-4xl mb-3">🎉</p>
-            <p>Aucun incident</p>
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <span className="text-4xl mb-3 opacity-60">🎉</span>
+            <p className="text-gray-400 font-medium text-sm">Aucun incident</p>
+            <p className="text-gray-600 text-xs mt-1">Tous les filtres appliqués</p>
           </div>
         )}
         {incidents.map(inc => (

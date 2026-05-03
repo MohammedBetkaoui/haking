@@ -341,7 +341,42 @@ async function notifyMonthlyReportGenerated({ report }) {
   return deliveries;
 }
 
+async function sendCyberAgentEmailAlert({ subject, text }) {
+  const mailer = getMailer();
+  const recipients = parseRecipients(process.env.ALERT_EMAIL_TO);
+
+  if (!mailer || recipients.length === 0) {
+    return {
+      sent: false,
+      reason: 'email_not_configured',
+      recipients: recipients,
+    };
+  }
+
+  try {
+    const response = await mailer.sendMail({
+      from: process.env.ALERT_EMAIL_FROM || process.env.SMTP_USER || 'guardian@localhost',
+      to: recipients.join(', '),
+      subject,
+      text,
+    });
+
+    return {
+      sent: true,
+      recipients,
+      messageId: response.messageId,
+    };
+  } catch (error) {
+    return {
+      sent: false,
+      reason: error.message,
+      recipients,
+    };
+  }
+}
+
 module.exports = {
   notifyIncidentEvent,
   notifyMonthlyReportGenerated,
+  sendCyberAgentEmailAlert,
 };

@@ -6,7 +6,38 @@ import StatsView from './components/StatsView';
 import NetworkScanView from './components/NetworkScanView';
 import AgentReportsView from './components/AgentReportsView';
 import { connectSocket } from './lib/socket';
+import { getPortCheckReportDownloadUrl } from './lib/api';
 import { Shield, BarChart2, List, Siren, Wifi, ShieldAlert, X, Bell, Bot } from 'lucide-react';
+
+// ─── Browser Notification helpers ────────────────────────────────────────────
+
+function requestBrowserNotificationPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    Notification.requestPermission().catch(() => {});
+  }
+}
+
+function sendBrowserNotification(title, body, tag) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    new Notification(title, { body, tag, icon: '/favicon.ico', requireInteraction: true });
+  } catch (_) {}
+}
+
+// ─── Auto-download report as CSV ─────────────────────────────────────────────
+
+function downloadPortCheckReport() {
+  try {
+    const url = getPortCheckReportDownloadUrl();
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `open-port-report-${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch (_) {}
+}
 
 // ─── Global Toast Notification System ───────────────────────────────────────
 
@@ -66,7 +97,13 @@ export default function App() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [agentUnreadCount, setAgentUnreadCount] = useState(0);
   const [latestDetectedIp, setLatestDetectedIp] = useState(null);
+  const [portThreatCount, setPortThreatCount] = useState(0);
   const recentDeviceAlertRef = useRef(new Map());
+
+  // ── Request browser notification permission on first render ─────────────
+  useEffect(() => {
+    requestBrowserNotificationPermission();
+  }, []);
 
   useEffect(() => {
     try {
@@ -108,10 +145,8 @@ export default function App() {
 
       setUnreadCount((c) => Math.min(99, c + 1));
       setLatestDetectedIp(ip);
-      pushToast(
-        title,
-        body
-      );
+      pushToast(title, body);
+      sendBrowserNotification(title, body, `device-${ip}`);
       setRefreshSignal((s) => s + 1); // refresh incident list
     });
 
@@ -132,10 +167,36 @@ export default function App() {
       );
     });
 
+    // ── Port-intrusion: fire browser notification + auto-download report ────
+    s.on('scan:port-check:done', (payload) => {
+      if (!payload) return;
+      const abnormal = payload.abnormal || [];
+      const open     = payload.open     || [];
+      if (abnormal.length === 0 && open.length === 0) return;
+
+      const targetIp = payload.target_ip || 'local';
+      const title    = `🔓 Ports suspects détectés — ${targetIp}`;
+      const body     = abnormal.length > 0
+        ? `Ports non autorisés : ${abnormal.join(', ')} · Rapport téléchargé automatiquement`
+        : `${open.length} port(s) ouvert(s) détectés sur ${targetIp}`;
+
+      setPortThreatCount((c) => Math.min(99, c + 1));
+      pushToast(title, body);
+      sendBrowserNotification(title, body, `port-check-${targetIp}`);
+
+      // Auto-save the report as CSV
+      if (abnormal.length > 0) {
+        downloadPortCheckReport();
+      }
+
+      setRefreshSignal((prev) => prev + 1);
+    });
+
     return () => {
       s.off('scanner:device_detected');
       s.off('incident:new');
       s.off('cyberagent:report');
+      s.off('scan:port-check:done');
     };
   }, [pushToast]);
 
@@ -157,102 +218,133 @@ export default function App() {
   const handleClose  = () => setSelectedId(null);
   const handleStatusChange = () => setRefreshSignal((s) => s + 1);
 
+  // ── Keyboard shortcuts (1-5 to switch views) ────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+      if (e.key === '1') { setView('list'); setSelectedId(null); }
+      else if (e.key === '2') { setView('sla'); setSelectedId(null); }
+      else if (e.key === '3') { setView('stats'); setSelectedId(null); }
+      else if (e.key === '4') { goToNetwork(); }
+      else if (e.key === '5') { goToAgentReports(); }
+      else if (e.key === 'Escape') { setSelectedId(null); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const navBtn = (active, onClick, children, extra = '') => (
+    <button
+      onClick={onClick}
+      className={`nav-btn relative flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-150 ${
+        active
+          ? 'text-blue-300 bg-blue-500/10 nav-active'
+          : 'text-gray-400 hover:text-gray-100 hover:bg-gray-800/70'
+      } ${extra}`}
+    >
+      {children}
+    </button>
+  );
+
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col">
       {/* Global toasts — visible on ANY tab */}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       {/* Top Nav */}
-      <header className="border-b border-gray-800 bg-gray-900/60 backdrop-blur sticky top-0 z-20">
-        <div className="max-w-screen-2xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Shield size={20} className="text-blue-400" />
-            <span className="text-gray-100 font-bold text-lg tracking-tight">Guardian</span>
-            <span className="text-gray-500 text-sm">SOC Dashboard</span>
+      <header className="border-b border-gray-800/80 bg-gray-900/80 backdrop-blur-md sticky top-0 z-20">
+        {/* critical alert ribbon */}
+        {portThreatCount > 0 && (
+          <div className="bg-red-900/40 border-b border-red-800/50 px-4 py-1.5 flex items-center justify-between">
+            <span className="text-red-300 text-xs font-medium flex items-center gap-2">
+              <ShieldAlert size={13} className="animate-pulse" />
+              {portThreatCount} alerte(s) port — rapport téléchargé automatiquement
+            </span>
+            <button onClick={() => setPortThreatCount(0)} className="text-red-400/60 hover:text-red-300 ml-4">
+              <X size={13} />
+            </button>
+          </div>
+        )}
+
+        <div className="max-w-screen-2xl mx-auto px-6 h-14 flex items-center justify-between gap-4">
+          {/* Logo */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="w-8 h-8 rounded-xl bg-blue-500/15 border border-blue-500/25 flex items-center justify-center">
+              <Shield size={16} className="text-blue-400" />
+            </div>
+            <div className="leading-none">
+              <span className="text-gray-100 font-bold text-base tracking-tight">Guardian</span>
+              <span className="hidden sm:inline text-gray-500 text-xs ml-2">SOC Dashboard</span>
+            </div>
           </div>
 
-          <nav className="flex items-center gap-1">
+          {/* Nav */}
+          <nav className="flex items-center gap-0.5">
+            {/* Bell notification icon */}
             <button
               onClick={goToNetwork}
               title={latestDetectedIp ? `Nouvelle IP: ${latestDetectedIp}` : 'Notifications réseau'}
-              className={`relative flex items-center justify-center w-9 h-9 rounded-lg transition-colors ${
+              className={`relative flex items-center justify-center w-9 h-9 rounded-lg mr-1 transition-all duration-150 ${
                 unreadCount > 0
                   ? 'text-red-300 bg-red-500/10 hover:bg-red-500/20'
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
+                  : 'text-gray-500 hover:text-gray-200 hover:bg-gray-800/70'
               }`}
             >
               <Bell size={15} className={unreadCount > 0 ? 'animate-pulse' : ''} />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 shadow-lg shadow-red-900/50">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
             </button>
             {latestDetectedIp && unreadCount > 0 && (
-              <span className="hidden md:inline-flex text-[11px] font-mono text-red-300 bg-red-500/10 border border-red-500/20 rounded-md px-2 py-1">
+              <span className="hidden lg:inline-flex text-[11px] font-mono text-red-300 bg-red-500/10 border border-red-500/20 rounded-md px-2 py-1 mr-2">
                 {latestDetectedIp}
               </span>
             )}
-            <button
-              onClick={() => setView('list')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                view === 'list' ? 'bg-gray-700 text-gray-100' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-              }`}
-            >
-              <List size={14} />
-              Incidents
-            </button>
-            <button
-              onClick={() => setView('sla')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                view === 'sla' ? 'bg-gray-700 text-gray-100' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-              }`}
-            >
-              <Siren size={14} />
-              SLA
-            </button>
-            <button
-              onClick={() => { setView('stats'); setSelectedId(null); }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                view === 'stats' ? 'bg-gray-700 text-gray-100' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-              }`}
-            >
-              <BarChart2 size={14} />
-              Statistiques
-            </button>
-            <button
-              onClick={goToNetwork}
-              className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                view === 'network' ? 'bg-gray-700 text-gray-100' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-              }`}
-            >
-              <Wifi size={14} />
-              Réseau
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 animate-pulse">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={goToAgentReports}
-              className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                view === 'agent-reports' ? 'bg-gray-700 text-gray-100' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'
-              }`}
-            >
-              <Bot size={14} />
-              Agent Reports
-              {agentUnreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-cyan-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 animate-pulse">
-                  {agentUnreadCount > 9 ? '9+' : agentUnreadCount}
-                </span>
-              )}
-            </button>
+
+            {/* Divider */}
+            <div className="w-px h-5 bg-gray-800 mx-1 hidden sm:block" />
+
+            {navBtn(view === 'list', () => { setView('list'); setSelectedId(null); },
+              <><List size={13} /><span>Incidents</span><span className="hidden lg:inline text-[10px] text-gray-600 ml-0.5">1</span></>
+            )}
+            {navBtn(view === 'sla', () => { setView('sla'); setSelectedId(null); },
+              <><Siren size={13} /><span>SLA</span><span className="hidden lg:inline text-[10px] text-gray-600 ml-0.5">2</span></>
+            )}
+            {navBtn(view === 'stats', () => { setView('stats'); setSelectedId(null); },
+              <><BarChart2 size={13} /><span className="hidden sm:inline">Statistiques</span><span className="hidden lg:inline text-[10px] text-gray-600 ml-0.5">3</span></>
+            )}
+            {navBtn(view === 'network', goToNetwork,
+              <>
+                <Wifi size={13} />
+                <span className="hidden sm:inline">Réseau</span>
+                <span className="hidden lg:inline text-[10px] text-gray-600 ml-0.5">4</span>
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 animate-pulse shadow-lg shadow-red-900/50">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+              </>
+            )}
+            {navBtn(view === 'agent-reports', goToAgentReports,
+              <>
+                <Bot size={13} />
+                <span className="hidden sm:inline">Agent</span>
+                <span className="hidden lg:inline text-[10px] text-gray-600 ml-0.5">5</span>
+                {agentUnreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-cyan-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1 animate-pulse shadow-lg shadow-cyan-900/50">
+                    {agentUnreadCount > 9 ? '9+' : agentUnreadCount}
+                  </span>
+                )}
+              </>
+            )}
           </nav>
         </div>
       </header>
 
       {/* Main */}
-      <main className="flex-1 max-w-screen-2xl mx-auto w-full px-6 py-6">
+      <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 md:px-6 py-5 animate-fade-up">
         {view === 'stats' ? (
           <StatsView />
         ) : view === 'agent-reports' ? (
@@ -260,9 +352,9 @@ export default function App() {
         ) : view === 'network' ? (
           <NetworkScanView />
         ) : (
-          <div className="flex gap-6 h-[calc(100vh-8rem)]">
+          <div className="flex gap-5 h-[calc(100vh-7.5rem)]">
             {/* Left: incident list */}
-            <div className={`${selectedId ? 'w-[420px] shrink-0' : 'flex-1'} card overflow-hidden flex flex-col transition-all`}>
+            <div className={`${selectedId ? 'w-[440px] shrink-0' : 'flex-1'} card overflow-hidden flex flex-col transition-all duration-200`}>
               {view === 'sla' ? (
                 <SlaBoard
                   onSelect={handleSelect}

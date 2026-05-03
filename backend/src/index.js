@@ -20,6 +20,7 @@ const usersRouter = require('./routes/users');
 const reportsRouter = require('./routes/reports');
 const cyberAgentRouter = require('./routes/cyberAgent');
 const deviceDetailsRouter = require('./routes/deviceDetails');
+const portCheckRouter = require('./routes/portCheck');
 const { runSlaMonitor } = require('./jobs/sla-monitor');
 const { runMonthlyReportJob } = require('./jobs/monthly-reports');
 const { startNetworkScanner, startLogWatcher, siemRouter } = require('./services/auto-detection.service');
@@ -73,6 +74,7 @@ app.use('/api/users', usersRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/cyber-agent', cyberAgentRouter);
 app.use('/api/auto-detect', siemRouter);
+app.use('/api/auto-detect/port-check', portCheckRouter);
 app.use('/api/siem', siemWebhookRouter);
 app.use('/api/device-details', deviceDetailsRouter);
 

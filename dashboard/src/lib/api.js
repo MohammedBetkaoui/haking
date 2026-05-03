@@ -44,6 +44,9 @@ export const fetchNetworkHosts = () =>
 export const getMonthlyReportDownloadUrl = (id) =>
   `${api.defaults.baseURL}/api/reports/monthly/${id}/download`;
 
+export const getPortCheckReportDownloadUrl = () =>
+  `${api.defaults.baseURL}/api/auto-detect/port-check/report?format=csv`;
+
 export const fetchDeviceDetails = (ip) =>
   api.get(`/api/device-details/${encodeURIComponent(ip)}`).then(r => r.data);
 
@@ -55,5 +58,14 @@ export const fetchCyberAgentReports = (limit = 50) =>
 
 export const fetchCyberAgentIncidents = (limit = 50) =>
   api.get('/api/cyber-agent/incidents', { params: { limit } }).then(r => r.data);
+
+export const deleteCyberAgentReport = (id) =>
+  api.delete(`/api/cyber-agent/reports/${id}`).then(r => r.data);
+
+export const fetchPortCheckReport = (limit = 25) =>
+  api.get('/api/auto-detect/port-check/report', { params: { limit } }).then(r => r.data);
+
+export const runPortCheck = (ip = null) =>
+  api.post('/api/auto-detect/port-check', ip ? { ip } : {}).then(r => r.data);
 
 export default api;
